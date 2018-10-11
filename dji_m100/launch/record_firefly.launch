@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<launch>
+
+<!-- ================================== DJI SDK =========================================
+    <include file="$(find dji_sdk)/launch/sdk.launch"/> -->
+
+<!-- =============================== Camera Fire Fly ====================================-->
+<node pkg="firefly_cam" type="capture" name="firefly_cam" output="screen"/>
+
+<!-- ==================================== Rosbag ========================================-->
+<arg name="path" default="$(find dji_m100)/../../bag_files/" />
+<arg name="file_1" default="cam" />
+<node pkg="rosbag" type="record" name="record" output="screen" args="-o $(arg path)$(arg file_1) -a --split --duration=1m"/>
+
+</launch>

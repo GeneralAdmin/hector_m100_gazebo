@@ -1,0 +1,12 @@
+<launch>
+    <include file="$(find dji_sdk)/launch/sdk.launch" />
+    <node pkg="firefly_cam" type="capture" name="capture" output="screen">
+    </node>
+    <node pkg="deck" type="deck_node" name="deck_node" output="screen">
+    </node>
+    <node pkg="drone_pose" type="drone_pose_node" name="drone_pose_node" output="screen">
+    </node>
+    <node pkg="drone_controller" type="quad_controller" name="quad_controller" output="screen">
+    </node>	
+</launch>
+

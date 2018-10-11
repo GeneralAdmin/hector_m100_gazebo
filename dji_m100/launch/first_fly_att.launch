@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+
+<launch>
+    <include file="$(find dji_sdk)/launch/sdk.launch" />
+
+
+
+
+<!--==================================== UKF algorithm =========================================== -->
+
+<!--Initial condition x = {pn pe h vx vy vz b_ax b_ay b_az b_wx b_wy b_wz-->
+<rosparam param="x_00">[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]</rosparam>
+<!--Initial Covariance-->
+<rosparam param="Pxx_00">[10, 10, 10, 1, 1, 1, 0.05, 0.05, 0.05, 0.005, 0.005, 0.005]</rosparam>
+<!--Covariance Matrix of Multiplicative Noise-->
+<rosparam param="Q1">[]</rosparam>
+<!--Covariance Matrix of Additive Noise-->
+<!--rosparam param="Q2">[4, 4, 0.1, 2, 2, 20, 0.000001, 0.000001, 0.000001]</rosparam--> 
+<!--rosparam param="Q2">[0.0000001, 0.0000001, 0.0000001, 0.1, 0.1, 10, 0.000001, 0.000001, 0.000001, 0.000000001, 0.000000001, 0.000000001]</rosparam--> 
+<rosparam param="Q2">[0.001, 0.001, 0.001, 0.5, 0.5, 10, 0.000001, 0.000001, 0.000001, 0.000000001, 0.000000001, 0.000000001]</rosparam> 
+<!--Covariance Matrix of Output Measurement Noise (scan-matching-trees)-->
+<rosparam param="R_scan">[0.036, 0.036]</rosparam>
+<!--Covariance Matrix of Output Measurement Noise (scan-matching-trees)-->
+<!--rosparam param="R_scan_vel">[0.025, 0.025]</rosparam-->	
+<rosparam param="R_scan_vel">[1, 1]</rosparam>
+<!--Covariance Matrix of Output Measurement Noise (GPS)-->
+<rosparam param="R_gps_p">[0.36, 0.36]</rosparam>
+<rosparam param="R_gps_v">[0.002, 0.002]</rosparam>
+<!--Covariance Matrix of Output Measurement Noise (Altimeter)-->
+<rosparam param="R_alt">[0.025]</rosparam>
+
+<!--What measurements are used?-->
+<param name="/use_gps" value="true" />
+<param name="/use_gps_vel" value="true" /> 
+<param name="/use_scan_vel" value="false" />
+<param name="/use_scan_pos" value="false" />
+
+<!--What measurements are adaptive?-->
+<param name="/adapt_gps" value="true" />
+<param name="/adapt_gps_vel" value="true" />
+<param name="/adapt_scan_vel" value="true" />
+<param name="/adapt_scan" value="true" />
+
+<node name="ukf_quarotor" pkg="quadrotor_estimation" type="quadrotor_node" output="screen"/>
+
+
+<!--================================== FIRST FLY EXAMPLE ================================-->
+
+
+    <param name="/m100/ukf_mode" type="bool" value="true"/>    
+    <param name="/m100/att_ctrl_gain_k" type="double" value="0.2"/>  	    
+
+    <node pkg="dji_m100" type="first_fly" name="first_fly_node" output="screen">
+
+	    <param name="vel" type="double" value="1.0"/>    
+	    <param name="t_wait" type="double" value="0.5"/>    
+	    <param name="t_desloc" type="double" value="5.0"/>    
+
+    </node>
+
+<!--============================== scan_matching_trees =================================== -->
+<param name="/use_attitude" value="false" />
+<param name="/use_imu" value="true" />
+<param name="/use_odom" value="false" />
+<node name="scan_matching_trees1" pkg="scan_matching_trees" type="scan_matching_trees_node" output="screen"/>
+
+</launch>

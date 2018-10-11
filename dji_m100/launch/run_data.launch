@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<launch>
+    <include file="$(find dji_sdk)/launch/sdk.launch"/>
+
+<!-- =============================== Hokuyo 30Lx-ew =====================================-->
+<node name="urg_node" pkg="urg_node" type="urg_node" output="screen">
+   <param name="ip_address" value="192.168.0.10"/>
+   <param name="frame_id" value="laser"/>
+   <param name="calibrate_time" value="true"/>
+   <param name="publish_intensity" value="false"/>
+   <param name="publish_multiecho" value="false"/>
+   <param name="angle_min" value="-1.5707963"/>
+   <param name="angle_max" value="1.5707963"/>
+ </node> 
+
+<!-- =============================== Camera Fire Fly ====================================-->
+<node pkg="firefly_cam" type="capture" name="firefly_cam" output="screen"/>
+
+</launch>

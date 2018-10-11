@@ -1,0 +1,389 @@
+#include "dji_m100/m100_hector.h"
+
+// ROS includes
+#include <tf/tf.h>
+
+// DJI SDK includes
+// #include "dji_sdk/dji_sdk.h"
+// #include <dji_sdk/DroneTaskControl.h>
+// #include <dji_sdk/SDKControlAuthority.h>
+// #include <dji_sdk/SetLocalPosRef.h>
+
+const float deg2rad = C_PI/180.0;
+const float rad2deg = 180.0/C_PI;
+
+using namespace coro; 
+
+M100_hector::M100_hector( ros::NodeHandle &nh, bool readOnly ): m_nh( nh ), m_readOnly(readOnly), m_flight_status(255), m_isAutonomous(false) 
+{
+  // Subscribe to messages from dji_sdk_node
+  //m_attitudeSub       = m_nh.subscribe("dji_sdk/attitude", 1, &M100_hector::attitude_callback, this);
+  
+  //m_gpsSub            = m_nh.subscribe("ground_truth/state", 1, &M100_hector::gps_callback, this);
+  m_gpsSub            = m_nh.subscribe("/fix", 1, &M100_hector::gps_callback, this);
+  
+  m_groundTruthSub       = m_nh.subscribe("/ground_truth/state", 1, &M100_hector::ground_truth_callback, this);
+   
+  
+  //m_gpsHealthSub      = m_nh.subscribe("dji_sdk/gps_health", 1, &M100_hector::gps_health_callback, this);
+  //m_flightStatusSub   = m_nh.subscribe("dji_sdk/flight_status", 1, &M100_hector::flight_status_callback,this);
+  //m_rcSub             = m_nh.subscribe("dji_sdk/rc", 1, &M100_hector::rc_callback, this);
+  //Velocity in ENU ground frame, published at 50 Hz. The velocity is valid only when gps_health >= 3.
+  m_velSub            = m_nh.subscribe("/fix_velocity", 1, &M100_hector::vel_callback, this);
+  // IMU data including raw gyro reading in FLU body frame,
+  m_imuSub            = m_nh.subscribe("/raw_imu", 1, &M100_hector::imu_callback, this);
+  //m_localPositionSub  = nh.subscribe("dji_sdk/local_position", 1, &M100_hector::local_position_callback, this);
+
+  
+   if(!m_readOnly)
+   {
+     m_velPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+//     // Publish the control signal
+//     m_ctrlBrakePub = nh.advertise<sensor_msgs::Joy>("dji_sdk/flight_control_setpoint_generic", 10);
+//     
+//     // Basic services
+//     m_sdk_ctrl_authority_service = m_nh.serviceClient<dji_sdk::SDKControlAuthority>("dji_sdk/sdk_control_authority");
+//     m_drone_task_service         = m_nh.serviceClient<dji_sdk::DroneTaskControl>("dji_sdk/drone_task_control");
+//     m_set_local_pos_ref_service  = m_nh.serviceClient<dji_sdk::SetLocalPosRef>("dji_sdk/set_local_pos_ref");
+   }
+
+    this->initZeroPos();
+  
+}
+
+void M100_hector::ground_truth_callback(const nav_msgs::Odometry::ConstPtr& msg)
+{
+  m_ground_truth = *msg;
+  m_current_atti = m_ground_truth.pose.pose.orientation;
+}
+
+void M100_hector::attitude_callback(const geometry_msgs::QuaternionStamped::ConstPtr& msg)
+{
+ // m_current_atti = msg->quaternion;
+}
+
+void M100_hector::gps_callback(const sensor_msgs::NavSatFix::ConstPtr& msg)
+{
+  m_current_gps = *msg;
+  m_isAutonomous = true;
+}
+
+void M100_hector::gps_health_callback(const std_msgs::UInt8::ConstPtr& msg)
+{
+  //m_gps_health = msg->data;
+}
+
+void M100_hector::flight_status_callback(const std_msgs::UInt8::ConstPtr& msg)
+{
+  //m_flight_status = msg->data;
+}
+
+void M100_hector::rc_callback(const sensor_msgs::Joy::ConstPtr& msg)
+{
+  //m_current_rc = *msg;
+}
+
+void M100_hector::vel_callback(const geometry_msgs::Vector3Stamped::ConstPtr& msg)
+{
+  m_current_vel = *msg;
+}
+
+void M100_hector::imu_callback(const sensor_msgs::Imu::ConstPtr& msg)
+{
+  m_current_imu = *msg;
+}
+
+void M100_hector::local_position_callback(const geometry_msgs::PointStamped::ConstPtr& msg)
+{
+//  m_local_position = *msg;
+}
+
+bool M100_hector::takeoff()
+{
+  if(m_readOnly)
+    return false;
+
+  geometry_msgs::Twist tvel;
+  tvel.linear.z = 1;
+  //tvel.linear.z = 5;
+  setVel(tvel);
+  ros::Duration(2.0).sleep();
+  //ros::Duration(2.5).sleep();
+  stop();
+
+  ros::Duration(0.01).sleep();
+  ros::spinOnce();
+
+  // ROS_INFO(" f_status = %d\n m_current_gps_z = %f\n home = %f", m_flight_status, m_current_gps.altitude, home_altitude);
+
+  ROS_INFO("(M100_hector) Successful takeoff!");
+  ros::spinOnce();
+
+  return true;    
+}
+
+
+/*!
+ * Landing
+ */
+bool M100_hector::land()
+{
+  if(m_readOnly)
+    return false;
+  
+  geometry_msgs::Twist tvel;
+  tvel.linear.z = -1;
+  setVel(tvel);
+  ros::Duration(10).sleep();
+  stop();
+
+  ros::Duration(0.01).sleep();
+  ros::spinOnce();
+
+  return true;
+}
+
+// Retorna true se o F mode está ativado.
+bool M100_hector::isAutonomous()
+{
+  return m_isAutonomous;
+}
+
+bool M100_hector::isGpsOk()
+{
+  return true;
+}
+
+void M100_hector::setVel(geometry_msgs::Twist vel, bool isBodyReferece)
+{
+  if(m_readOnly)
+    return;
+  
+   if(!isBodyReferece)
+   {
+      tf::Quaternion init_orient, curr_orient;
+      tf::quaternionMsgToTF( m_initial_orientation, init_orient );
+      tf::quaternionMsgToTF( m_current_atti, curr_orient );
+      //ROS_INFO( "init_orient = %f, %f, %f, %f", init_orient.x(), init_orient.y(), init_orient.z(), init_orient.w() );
+      //ROS_INFO( "curr_orient = %f, %f, %f, %f", curr_orient.x(), curr_orient.y(), curr_orient.z(), curr_orient.w() );
+      tf::Quaternion tf_q = curr_orient * init_orient.inverse();
+      //ROS_INFO( "tf_q = %f, %f, %f, %f", tf_q.x(), tf_q.y(), tf_q.z(), tf_q.w() );
+      
+      tf::Vector3 tfVel;
+      tf::vector3MsgToTF(vel.linear,tfVel);	    
+
+      //tf_q.normalize();
+      tf::Matrix3x3 tf_R(tf_q);
+      tfVel = tf_R.transpose() * tfVel;
+      tf::vector3TFToMsg(tfVel, vel.linear);
+     
+      //ROS_INFO( "vel = %f, %f, %f", vel.linear.x, vel.linear.y, vel.linear.z );
+   }
+  
+  m_velPub.publish(vel);
+}
+
+geometry_msgs::Twist M100_hector::getVel()
+{
+  geometry_msgs::Twist vel;
+
+  vel.linear = m_current_vel.vector;
+  vel.angular = m_current_imu.angular_velocity;
+  return vel;
+}
+
+// Para o quadrirrotor
+void M100_hector::stop()
+{
+  geometry_msgs::Twist vel; // Construtor inicializa com zeros.
+  setVel(vel);
+}
+
+// Espera até usuário desativar o F mode.
+void M100_hector::waitNotAutonomousMode()
+{
+  
+}
+
+bool M100_hector::takeoff_land(int task)
+{
+  if(m_readOnly)
+    return false;
+  
+  return true;
+}
+
+bool M100_hector::obtain_control()
+{
+  if(m_readOnly)
+    return true;
+
+  return true;
+}
+
+bool M100_hector::set_local_pos_ref()
+{
+  if(m_readOnly)
+    return false;
+
+  return true;
+}
+
+
+void M100_hector::flyToGPSPos(sensor_msgs::NavSatFix gps_pos)
+{
+  if(m_readOnly)
+    return;
+
+}
+
+
+bool M100_hector::printGPSPos()
+{
+  if( isGpsOk() )
+{
+
+  
+
+  m_start_gps_location = getCurrGPSPos();
+    
+  ROS_INFO("M100_hector::initZeroPos(): gps (lat,lon,alt) = %f, %f, %f",
+	   m_start_gps_location.latitude,
+	   m_start_gps_location.longitude,
+	   m_start_gps_location.altitude);
+  
+  return true;
+}
+else
+{
+retunr false;
+}
+
+}
+
+
+sensor_msgs::NavSatFix M100_hector::getCurrGPSPos()
+{
+  return m_current_gps;
+}
+
+geometry_msgs::PointStamped M100_hector::getCurrLocalPos()
+{
+  return m_local_position;
+}
+
+void M100_hector::flyToPos(geometry_msgs::Pose pos)
+{
+}
+
+geometry_msgs::Pose M100_hector::getCurrPos()
+{
+
+ /* geometry_msgs::Pose pos;
+  geometry_msgs::Point localOffset;
+  sensor_msgs::NavSatFix currPose = getCurrGPSPos();
+  localOffsetFromGpsOffset(localOffset, currPose, m_start_gps_location);
+
+  pos.position = localOffset;
+  
+  tf::Quaternion init_orient, curr_orient;
+  tf::quaternionMsgToTF( m_initial_orientation, init_orient );
+  tf::quaternionMsgToTF( m_current_atti, curr_orient );
+  tf::quaternionTFToMsg( curr_orient * init_orient.inverse(), pos.orientation );
+  
+  ROS_INFO("M100_hector::getCurrPos(): pos = %f, %f, %f",
+	   localOffset.x,
+	   localOffset.y,
+	   localOffset.z); */ 
+
+  return m_ground_truth.pose.pose;
+  //return pos;
+}
+
+nav_msgs::Odometry M100_hector::getOdometry()
+{
+  nav_msgs::Odometry odom;
+  odom.pose.pose = getCurrPos();
+  odom.twist.twist = getVel();
+  return odom;
+}
+
+bool M100_hector::initZeroPos()
+{
+  if( !isGpsOk() )
+    return false;
+
+  //set_local_pos_ref();
+
+  m_start_gps_location = getCurrGPSPos();
+  initZeroHeading();
+
+  
+  ROS_INFO("M100_hector::initZeroPos(): gps (lat,lon,alt) = %f, %f, %f",
+	   m_start_gps_location.latitude,
+	   m_start_gps_location.longitude,
+	   m_start_gps_location.altitude);
+  
+  return true;
+}
+
+void M100_hector::initZeroHeading()
+{
+  //m_initial_orientation = m_ground_truth.pose.pose.orientation;
+  m_initial_orientation = m_current_atti;
+}
+
+
+int M100_hector::getStatus()
+{
+  return m_flight_status;
+}
+
+int M100_hector::showStatus()
+{
+  ROS_INFO("M100_hector_simulation");
+  return 1;
+}
+
+bool M100_hector::isFlying()
+{
+  return true;
+}
+
+bool M100_hector::isTakingOff()
+{
+  return true;
+}
+
+bool M100_hector::isLanding()
+{
+  return true;
+}
+
+
+// Helper Functions
+
+/*! Very simple calculation of local NED offset between two pairs of GPS
+/coordinates. Accurate when distances are small.
+!*/
+// Ex.: localOffsetFromGpsOffset(localOffset, current_gps, start_gps_location);
+void M100_hector::localOffsetFromGpsOffset(geometry_msgs::Point&  deltaNed,
+                         sensor_msgs::NavSatFix& target,
+                         sensor_msgs::NavSatFix& origin)
+{
+  double deltaLon = target.longitude - origin.longitude;
+  double deltaLat = target.latitude - origin.latitude;
+
+  deltaNed.y = deltaLat * deg2rad * C_EARTH;
+  deltaNed.x = deltaLon * deg2rad * C_EARTH * cos(deg2rad*target.latitude);
+  deltaNed.z = target.altitude - origin.altitude;
+}
+
+geometry_msgs::Point M100_hector::toEulerAngle(geometry_msgs::Quaternion quat)
+{
+  geometry_msgs::Point ans;
+
+  tf::Matrix3x3 R_FLU2ENU(tf::Quaternion(quat.x, quat.y, quat.z, quat.w));
+  R_FLU2ENU.getRPY(ans.x, ans.y, ans.z);
+  return ans;
+}

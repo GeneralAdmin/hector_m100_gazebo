@@ -1,0 +1,8 @@
+<launch>
+    <node pkg="dji_m100" type="first_fly_hector" name="first_fly_hector_node" output="screen">
+    <param name="vel" type="double" value="0.5"/>    
+    <param name="t_wait" type="double" value="2.0"/>    
+    <param name="t_desloc" type="double" value="3.0"/>    
+    </node>
+
+</launch>
